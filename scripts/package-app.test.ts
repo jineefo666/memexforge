@@ -183,9 +183,13 @@ describe('package-app', () => {
     await expect(readFile(join(outDir, 'bin', 'openclaude'), 'utf8')).resolves.toContain(
       '#!/usr/bin/env node',
     )
-    await expect(
-      readFile(join(outDir, 'bin', 'app-bridge'), 'utf8'),
-    ).resolves.toContain('../runtime/bun')
+    const appBridgeLauncher = await readFile(
+      join(outDir, 'bin', 'app-bridge'),
+      'utf8',
+    )
+    expect(appBridgeLauncher).toContain('../runtime/bun')
+    expect(appBridgeLauncher).toContain('/opt/homebrew/bin')
+    expect(appBridgeLauncher).toContain('/usr/local/bin')
     await expect(readFile(join(outDir, 'runtime', 'bun'), 'utf8')).resolves.toContain(
       '#!/usr/bin/env bun',
     )

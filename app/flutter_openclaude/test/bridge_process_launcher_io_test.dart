@@ -57,4 +57,27 @@ void main() {
     expect(fallback, contains('agent-eval'));
     expect(fallback.startsWith('/'), isTrue);
   });
+
+  test('bridge launch environment adds common Node tool locations', () {
+    final environment = appBridgeLaunchEnvironment(
+      baseEnvironment: const {'PATH': '/usr/bin', 'HOME': '/Users/developer'},
+      host: '127.0.0.1',
+      port: '58432',
+      agentEvalTraceEnabled: true,
+      traceDir: '/tmp/memexforge-traces',
+    );
+
+    final pathEntries = environment['PATH']!.split(':');
+
+    expect(pathEntries.first, '/usr/bin');
+    expect(pathEntries, contains('/opt/homebrew/bin'));
+    expect(pathEntries, contains('/usr/local/bin'));
+    expect(environment['APP_BRIDGE_HOST'], '127.0.0.1');
+    expect(environment['APP_BRIDGE_PORT'], '58432');
+    expect(environment['OPENCLAUDE_AGENT_EVAL_TRACE'], '1');
+    expect(
+      environment['OPENCLAUDE_AGENT_EVAL_TRACE_DIR'],
+      '/tmp/memexforge-traces',
+    );
+  });
 }

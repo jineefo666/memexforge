@@ -40,19 +40,18 @@ final class DesktopBridgeProcessLauncher implements BridgeProcessLauncher {
     final traceDir = defaultAgentEvalTraceDirectory(
       environment: Platform.environment,
     );
+    final environment = appBridgeLaunchEnvironment(
+      baseEnvironment: Platform.environment,
+      host: host,
+      port: port,
+      agentEvalTraceEnabled: agentEvalTraceEnabled,
+      traceDir: traceDir,
+    );
     final process = await Process.start(
       launcherPath,
       const [],
       mode: ProcessStartMode.detachedWithStdio,
-      environment: {
-        ...Platform.environment,
-        'APP_BRIDGE_HOST': host,
-        'APP_BRIDGE_PORT': port,
-        if (agentEvalTraceEnabled) ...{
-          'OPENCLAUDE_AGENT_EVAL_TRACE': '1',
-          'OPENCLAUDE_AGENT_EVAL_TRACE_DIR': traceDir,
-        },
-      },
+      environment: environment,
     );
     return BridgeProcessStartResult(
       started: true,
@@ -63,6 +62,58 @@ final class DesktopBridgeProcessLauncher implements BridgeProcessLauncher {
       pid: process.pid,
     );
   }
+}
+
+@visibleForTesting
+Map<String, String> appBridgeLaunchEnvironment({
+  required Map<String, String> baseEnvironment,
+  required String host,
+  required String port,
+  required bool agentEvalTraceEnabled,
+  required String traceDir,
+}) {
+  final pathKey = Platform.isWindows && baseEnvironment.containsKey('Path')
+      ? 'Path'
+      : 'PATH';
+  final path = appBridgePathWithNodeToolFallbacks(
+    baseEnvironment[pathKey] ??
+        baseEnvironment['PATH'] ??
+        baseEnvironment['Path'],
+  );
+  return {
+    ...baseEnvironment,
+    if (path.isNotEmpty) pathKey: path,
+    'APP_BRIDGE_HOST': host,
+    'APP_BRIDGE_PORT': port,
+    if (agentEvalTraceEnabled) ...{
+      'OPENCLAUDE_AGENT_EVAL_TRACE': '1',
+      'OPENCLAUDE_AGENT_EVAL_TRACE_DIR': traceDir,
+    },
+  };
+}
+
+@visibleForTesting
+String appBridgePathWithNodeToolFallbacks(String? currentPath) {
+  final separator = Platform.isWindows ? ';' : ':';
+  final fallbacks = Platform.isWindows
+      ? const <String>[]
+      : const <String>[
+          '/opt/homebrew/bin',
+          '/usr/local/bin',
+          '/usr/bin',
+          '/bin',
+          '/usr/sbin',
+          '/sbin',
+        ];
+  final entries = <String>[
+    ...?currentPath
+        ?.split(separator)
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty),
+    ...fallbacks,
+  ];
+  final seen = <String>{};
+  return entries.where(seen.add).join(separator);
 }
 
 @visibleForTesting
