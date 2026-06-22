@@ -1,0 +1,101 @@
+require "shellwords"
+
+default_platform(:mac)
+
+def openclaude_root
+  File.expand_path("..", __dir__)
+end
+
+def openclaude_truthy?(value)
+  %w[1 true yes on].include?(value.to_s.strip.downcase)
+end
+
+def openclaude_required_env!(name, value)
+  return unless value.to_s.strip.empty?
+
+  UI.user_error!("Missing #{name}. Set it before running `fastlane mac release`.")
+end
+
+def openclaude_bun_command
+  bun_path = ENV["BUN_PATH"].to_s.strip
+  unless bun_path.empty?
+    ENV["PATH"] = "#{File.dirname(bun_path)}:#{ENV.fetch("PATH", "")}"
+    return Shellwords.escape(bun_path)
+  end
+
+  return "bun" if system("command -v bun >/dev/null 2>&1")
+  return "npx --yes bun@1.3.14" if system("command -v npx >/dev/null 2>&1")
+
+  UI.user_error!("Bun is required. Install Bun, set BUN_PATH, or make npx available.")
+end
+
+def openclaude_notary_args(profile:, apple_id:, team_id:, password:)
+  return "--keychain-profile #{profile.shellescape}" unless profile.to_s.strip.empty?
+
+  [
+    "--apple-id #{apple_id.shellescape}",
+    "--team-id #{team_id.shellescape}",
+    "--password #{password.shellescape}",
+  ].join(" ")
+end
+
+platform :mac do
+  desc "Build, sign, notarize, and package MemexForge for macOS distribution"
+  lane :release do |options|
+    root = openclaude_root
+    out_dir = (options[:out_dir] || ENV["OPENCLAUDE_APP_OUT_DIR"] || "dist/openclaude-app").to_s
+    package_out_dir = File.expand_path(out_dir, root)
+    release_dir = File.expand_path(
+      (options[:release_dir] || ENV["OPENCLAUDE_RELEASE_DIR"] || "dist/release").to_s,
+      root,
+    )
+    app_name = (options[:app_name] || ENV["OPENCLAUDE_RELEASE_APP_NAME"] || "MemexForge").to_s
+    identity = (options[:codesign_identity] || ENV["MACOS_CODESIGN_IDENTITY"]).to_s.strip
+    notary_profile = (options[:notary_profile] || ENV["MACOS_NOTARY_KEYCHAIN_PROFILE"]).to_s.strip
+    apple_id = (options[:apple_id] || ENV["APPLE_ID"]).to_s.strip
+    team_id = (options[:team_id] || ENV["APPLE_TEAM_ID"]).to_s.strip
+    password = (
+      options[:apple_app_specific_password] ||
+        ENV["APPLE_APP_SPECIFIC_PASSWORD"] ||
+        ENV["FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD"]
+    ).to_s.strip
+    skip_notarize = openclaude_truthy?(options[:skip_notarize] || ENV["MACOS_SKIP_NOTARIZE"])
+
+    openclaude_required_env!("MACOS_CODESIGN_IDENTITY", identity)
+    unless skip_notarize || !notary_profile.empty?
+      openclaude_required_env!("MACOS_NOTARY_KEYCHAIN_PROFILE or APPLE_ID", apple_id)
+      openclaude_required_env!("APPLE_TEAM_ID", team_id)
+      openclaude_required_env!("APPLE_APP_SPECIFIC_PASSWORD", password)
+    end
+
+    sh("cd #{root.shellescape} && #{openclaude_bun_command} run scripts/package-app.ts --target macos --out-dir #{package_out_dir.shellescape}")
+
+    packaged_app = File.join(package_out_dir, "flutter", "macos", "MemexForge.app")
+    release_app = File.join(release_dir, "#{app_name}.app")
+    dmg_root = File.join(release_dir, "dmg-root")
+    dmg_path = File.join(release_dir, "#{app_name}-mac.dmg")
+
+    sh("test -d #{packaged_app.shellescape}")
+    sh("rm -rf #{release_dir.shellescape}")
+    sh("mkdir -p #{release_dir.shellescape}")
+    sh("cp -R #{packaged_app.shellescape} #{release_app.shellescape}")
+
+    sh("codesign --force --deep --options runtime --timestamp --sign #{identity.shellescape} #{release_app.shellescape}")
+    sh("codesign --verify --deep --strict --verbose=2 #{release_app.shellescape}")
+
+    sh("mkdir -p #{dmg_root.shellescape}")
+    sh("cp -R #{release_app.shellescape} #{File.join(dmg_root, "#{app_name}.app").shellescape}")
+    sh("ln -s /Applications #{File.join(dmg_root, "Applications").shellescape}")
+    sh("hdiutil create -volname #{app_name.shellescape} -srcfolder #{dmg_root.shellescape} -ov -format UDZO #{dmg_path.shellescape}")
+    sh("codesign --force --timestamp --sign #{identity.shellescape} #{dmg_path.shellescape}")
+
+    unless skip_notarize
+      sh("xcrun notarytool submit #{dmg_path.shellescape} #{openclaude_notary_args(profile: notary_profile, apple_id: apple_id, team_id: team_id, password: password)} --wait")
+      sh("xcrun stapler staple #{dmg_path.shellescape}")
+      sh("spctl -a -vv -t install #{dmg_path.shellescape}")
+    end
+
+    UI.success("macOS release written to #{dmg_path}")
+    dmg_path
+  end
+end
