@@ -941,51 +941,37 @@ $request
 
     final isSameProject = _activeWorkingDirectory.trim() == path;
     _rememberActiveMessages();
-    _cancelActiveBridgeTurn();
-    if (!isSameProject) {
-      final id = _nextSessionId();
-      final session = SessionSummary(
-        id: id,
-        title: _projectTitleForPath(path),
-        subtitle: path,
-        status: SessionStatus.idle,
-        updatedLabel: 'Now',
-      );
+    if (isSameProject) {
       _state = _state.copyWith(
         personal: _state.personal.copyWith(defaultWorkingDirectory: path),
-        sessions: [session, ..._state.sessions],
-        activeSessionId: id,
-        messages: const [],
-        toolRuns: const [],
-        permissionRequests: const [],
-        retrievedContextItems: const [],
-        learningCandidates: const [],
-        activeExtensions: const ActiveExtensionsState(),
-        destination: WorkbenchDestination.chat,
-        inspector: const InspectorSelection(kind: InspectorKind.context),
-        isStreaming: false,
+        sessions: _updateActiveSession(
+          (session) => session.copyWith(subtitle: path, updatedLabel: 'Now'),
+        ),
         diagnosticLogs: _prependDiagnostic(
           DiagnosticSeverity.success,
-          'Project opened',
+          'Project directory selected',
           'Current session workspace is $path.',
         ),
         clearErrorMessage: true,
       );
-      _messagesBySessionId[id] = const [];
       notifyListeners();
       _persistState();
       return;
     }
 
+    _cancelActiveBridgeTurn();
+    final id = _nextSessionId();
+    final session = SessionSummary(
+      id: id,
+      title: _projectTitleForPath(path),
+      subtitle: path,
+      status: SessionStatus.idle,
+      updatedLabel: 'Now',
+    );
     _state = _state.copyWith(
       personal: _state.personal.copyWith(defaultWorkingDirectory: path),
-      sessions: _updateActiveSession(
-        (session) => session.copyWith(
-          subtitle: path,
-          updatedLabel: 'Now',
-          clearSdkSessionId: true,
-        ),
-      ),
+      sessions: [session, ..._state.sessions],
+      activeSessionId: id,
       messages: const [],
       toolRuns: const [],
       permissionRequests: const [],
@@ -997,12 +983,12 @@ $request
       isStreaming: false,
       diagnosticLogs: _prependDiagnostic(
         DiagnosticSeverity.success,
-        'Project directory selected',
+        'Project opened',
         'Current session workspace is $path.',
       ),
       clearErrorMessage: true,
     );
-    _messagesBySessionId[_state.activeSessionId] = const [];
+    _messagesBySessionId[id] = const [];
     notifyListeners();
     _persistState();
   }

@@ -635,6 +635,14 @@ void main() {
             ),
           ],
           activeSessionId: 'session-project',
+          messages: const [
+            ChatMessage(
+              id: 'message-existing',
+              role: MessageRole.user,
+              content: '继续刚才的俄罗斯方块实现',
+              timestampLabel: 'Now',
+            ),
+          ],
         ),
         projectDirectoryPicker: () async => '/workspace/mobile-app',
       );
@@ -644,14 +652,15 @@ void main() {
       expect(controller.state.sessions, hasLength(1));
       expect(controller.state.activeSessionId, 'session-project');
       expect(controller.state.activeSession?.subtitle, '/workspace/mobile-app');
-      expect(controller.state.activeSession?.sdkSessionId, isNull);
+      expect(controller.state.activeSession?.sdkSessionId, 'sdk-openclaude');
+      expect(controller.state.messages.single.content, '继续刚才的俄罗斯方块实现');
 
       controller.dispose();
     },
   );
 
   test(
-    'chooseProjectDirectory resets stale messages for the selected project',
+    'chooseProjectDirectory keeps existing messages for the selected project',
     () async {
       final controller = WorkbenchController(
         initialState: createInitialWorkbenchState().copyWith(
@@ -689,8 +698,8 @@ void main() {
       await controller.chooseProjectDirectory();
 
       expect(controller.state.activeSession?.subtitle, '/workspace/testclaude');
-      expect(controller.state.activeSession?.sdkSessionId, isNull);
-      expect(controller.state.messages, isEmpty);
+      expect(controller.state.activeSession?.sdkSessionId, 'sdk-openclaude');
+      expect(controller.state.messages.single.content, contains('openclaude'));
 
       controller.dispose();
     },
