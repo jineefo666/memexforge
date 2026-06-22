@@ -14,7 +14,7 @@ It wraps the existing OpenClaude CLI and SDK runtime in a Flutter desktop/Web in
 
 - [Download MemexForge for macOS](https://github.com/jineefo666/memexforge/releases/download/v0.19.0/MemexForge-mac.dmg)
 - Release page: [MemexForge v0.19.0](https://github.com/jineefo666/memexforge/releases/tag/v0.19.0)
-- SHA256: `227f942f0abb3d4a8c8f7d1fd32d5eaf384516fb9f06dc1679773b5fa0fbda56`
+- SHA256: `c5a06a867c251b3d0ebe2f7919b45e5e72caa3f0dd19fb2613c88800e0dc66b7`
 
 ## Highlights
 
