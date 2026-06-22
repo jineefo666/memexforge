@@ -1,5 +1,7 @@
 # MemexForge
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 MemexForge is a cross-platform agent workbench for developers who need an AI assistant that can remember long-running work, operate inside local projects, call tools safely, and stay inspectable.
 
 It wraps the existing OpenClaude CLI and SDK runtime in a Flutter desktop/Web interface. The UI handles chat, sessions, model settings, permissions, skills, MCP servers, context retrieval, diagnostics, and release packaging while the underlying agent execution remains in the OpenClaude TypeScript runtime.
