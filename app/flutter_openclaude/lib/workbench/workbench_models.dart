@@ -116,6 +116,7 @@ final class ChatAttachment {
     required this.kind,
     this.path,
     this.content,
+    this.dataBase64,
   });
 
   final String id;
@@ -125,6 +126,7 @@ final class ChatAttachment {
   final ChatAttachmentKind kind;
   final String? path;
   final String? content;
+  final String? dataBase64;
 }
 
 final class ChatTokenUsage {

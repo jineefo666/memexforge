@@ -408,12 +408,25 @@ void main() {
 
       await tester.drag(
         find.byKey(const ValueKey('diagnostics-scroll')),
-        const Offset(0, -240),
+        const Offset(0, -520),
       );
       await tester.pumpAndSettle();
+      final timelineTile = find.byKey(
+        const ValueKey('diagnostics-timeline-timeline-1'),
+      );
       expect(find.text('Turn timeline'), findsOneWidget);
-      expect(find.text('First SDK message'), findsOneWidget);
-      expect(find.text('842 ms'), findsOneWidget);
+      expect(timelineTile, findsOneWidget);
+      expect(
+        find.descendant(
+          of: timelineTile,
+          matching: find.text('First SDK message'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: timelineTile, matching: find.text('842 ms')),
+        findsOneWidget,
+      );
 
       await tester.drag(
         find.byKey(const ValueKey('diagnostics-scroll')),
@@ -600,8 +613,21 @@ void main() {
     );
 
     expect(find.text('Memory'), findsOneWidget);
-    expect(find.text('Preferred tone'), findsOneWidget);
-    expect(find.text('User prefers concise answers.'), findsOneWidget);
+    final memoryFact = find.byKey(
+      const ValueKey('memory-fact-profile-profile-tone'),
+    );
+    expect(memoryFact, findsOneWidget);
+    expect(
+      find.descendant(of: memoryFact, matching: find.text('Preferred tone')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: memoryFact,
+        matching: find.text('User prefers concise answers.'),
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byTooltip('Refresh memory'));
     await tester.pump();

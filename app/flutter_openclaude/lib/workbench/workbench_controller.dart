@@ -27,11 +27,13 @@ final class _PendingBridgeStart {
     required this.requestId,
     required this.prompt,
     required this.transcript,
+    required this.attachments,
   });
 
   final String requestId;
   final String prompt;
   final List<BridgeTranscriptMessage> transcript;
+  final List<ChatAttachment> attachments;
 }
 
 final class _SlashSkillPrompt {
@@ -159,9 +161,36 @@ class WorkbenchController extends ChangeNotifier {
   void sendMessage(String text, {List<ChatAttachment> attachments = const []}) {
     final prompt = text.trim();
     if (prompt.isEmpty && attachments.isEmpty) return;
+    if (_activeRequestId != null || _state.isStreaming) {
+      _state = _state.copyWith(
+        diagnosticLogs: _prependDiagnostic(
+          DiagnosticSeverity.warning,
+          'Request already running',
+          'Wait for the current response to finish or stop it before sending another message.',
+        ),
+      );
+      notifyListeners();
+      return;
+    }
     final visiblePrompt = prompt.isEmpty
         ? _attachmentOnlyPrompt(attachments)
         : prompt;
+    if (_hasImageAttachments(attachments) &&
+        !_activeProviderSupportsImageAttachments()) {
+      final message = _unsupportedImageModelMessage(_state.provider.modelName);
+      _state = _state.copyWith(
+        isStreaming: false,
+        connectionStatus: ConnectionStatus.error,
+        errorMessage: message,
+        diagnosticLogs: _prependDiagnostic(
+          DiagnosticSeverity.error,
+          'Image input unavailable',
+          message,
+        ),
+      );
+      notifyListeners();
+      return;
+    }
 
     final requestId = _nextRequestId();
     _activeRequestId = requestId;
@@ -229,6 +258,7 @@ class WorkbenchController extends ChangeNotifier {
         requestId: requestId,
         prompt: bridgePrompt,
         transcript: transcript,
+        attachments: attachments,
       );
       return;
     }
@@ -237,6 +267,7 @@ class WorkbenchController extends ChangeNotifier {
         requestId: requestId,
         prompt: bridgePrompt,
         transcript: transcript,
+        attachments: attachments,
       );
       reconnectBridge();
       return;
@@ -247,6 +278,47 @@ class WorkbenchController extends ChangeNotifier {
     return attachments.length == 1
         ? 'Review the attached file.'
         : 'Review the attached files.';
+  }
+
+  bool _hasImageAttachments(List<ChatAttachment> attachments) {
+    return attachments.any(
+      (attachment) => attachment.kind == ChatAttachmentKind.image,
+    );
+  }
+
+  bool _activeProviderSupportsImageAttachments() {
+    final provider = _state.provider;
+    final route = [
+      provider.providerName,
+      provider.modelName,
+      provider.baseUrl,
+    ].join(' ').toLowerCase();
+    if (_looksVisionCapableRoute(route)) return true;
+    if (_looksKnownTextOnlyRoute(route)) return false;
+    return true;
+  }
+
+  bool _looksVisionCapableRoute(String route) {
+    return route.contains('vision') ||
+        route.contains('qwen-vl') ||
+        route.contains('qwen2.5-vl') ||
+        route.contains('qwen3-vl') ||
+        route.contains('vl-') ||
+        route.contains('-vl') ||
+        route.contains('qvq') ||
+        route.contains('janus') ||
+        route.contains('omni') ||
+        route.contains('gpt-4o') ||
+        route.contains('gemini') ||
+        route.contains('claude');
+  }
+
+  bool _looksKnownTextOnlyRoute(String route) {
+    return route.contains('deepseek') || route.contains('coder');
+  }
+
+  String _unsupportedImageModelMessage(String modelName) {
+    return 'The selected model $modelName does not support images. Switch to a vision-capable model, then send the image again.';
   }
 
   List<RetrievedContextItem> _attachmentContextItems(
@@ -1301,7 +1373,9 @@ $request
   }
 
   void submitApiKey(String apiKey) {
-    if (apiKey.trim().isEmpty) return;
+    final trimmedApiKey = apiKey.trim();
+    if (trimmedApiKey.isEmpty) return;
+    _apiKeysByRoute[_routeKeyForProvider(_state.provider)] = trimmedApiKey;
     _state = _state.copyWith(
       provider: _state.provider.copyWith(apiKeyConfigured: true),
       inspector: const InspectorSelection(kind: InspectorKind.settings),
@@ -1331,8 +1405,7 @@ $request
 
   ProviderConnectionRequest? connectionRequestForCurrentProvider() {
     final provider = _state.provider;
-    final routeKey =
-        '${provider.providerName}::${provider.modelName}::${provider.baseUrl}';
+    final routeKey = _routeKeyForProvider(provider);
     final apiKey = _apiKeysByRoute[routeKey];
     if (apiKey == null) return null;
     return ProviderConnectionRequest(
@@ -1341,6 +1414,10 @@ $request
       baseUrl: provider.baseUrl,
       apiKey: apiKey,
     );
+  }
+
+  String _routeKeyForProvider(ProviderSettings provider) {
+    return '${provider.providerName}::${provider.modelName}::${provider.baseUrl}';
   }
 
   void updatePersonal(PersonalSettings personal) {
@@ -1636,7 +1713,8 @@ $request
   }
 
   bool _isRequestScopedBridgeError(String code) {
-    return code == 'QUERY_FAILED' ||
+    return code == 'QUERY_RUNNING' ||
+        code == 'QUERY_FAILED' ||
         code == 'CONTEXT_RETRIEVAL_FAILED' ||
         code == 'CONTEXT_LEARN_FAILED' ||
         code == 'CONTEXT_EVAL_FAILED' ||
@@ -1723,6 +1801,7 @@ $request
       requestId: pending.requestId,
       prompt: pending.prompt,
       transcript: pending.transcript,
+      attachments: pending.attachments,
     );
   }
 
@@ -1730,6 +1809,7 @@ $request
     required String requestId,
     required String prompt,
     required List<BridgeTranscriptMessage> transcript,
+    required List<ChatAttachment> attachments,
   }) {
     final bridgeClient = _bridgeClient;
     if (bridgeClient == null) return;
@@ -1747,6 +1827,7 @@ $request
           ? 'enabled'
           : 'disabled',
       transcript: transcript,
+      attachments: _bridgeAttachmentsForChatAttachments(attachments),
       provider: providerRequest == null
           ? null
           : BridgeProviderConfig(
@@ -1756,6 +1837,25 @@ $request
               apiKey: providerRequest.apiKey,
             ),
     );
+  }
+
+  List<BridgeAttachment> _bridgeAttachmentsForChatAttachments(
+    List<ChatAttachment> attachments,
+  ) {
+    if (attachments.isEmpty) return const [];
+    return [
+      for (final attachment in attachments)
+        BridgeAttachment(
+          id: attachment.id,
+          name: attachment.name,
+          kind: attachment.kind.name,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          path: attachment.path,
+          content: attachment.content,
+          dataBase64: attachment.dataBase64,
+        ),
+    ];
   }
 
   List<BridgeTranscriptMessage> _bridgeTranscriptForMessages(
@@ -2431,6 +2531,13 @@ $request
     return textBlocks.join();
   }
 
+  String _emptyVisibleAssistantResponseMessage() {
+    if (_activeStreamThinkingDeltaCount > 0) {
+      return 'No visible response was returned by the provider. Try turning off Think mode or switching to a model that returns visible answer text.';
+    }
+    return 'No visible response was returned by the provider. Check the provider response format or try again.';
+  }
+
   void _upsertStreamingAssistantMessage(
     String nextText, {
     bool isSnapshot = false,
@@ -2474,11 +2581,12 @@ $request
     ChatTokenUsage? tokenUsage,
     List<DiagnosticLogEntry>? diagnosticLogs,
   }) {
+    final hasVisibleContent = content.trim().isNotEmpty;
     final messageId = _streamingAssistantMessageId;
     if (messageId != null) {
-      final nextContent = content.isEmpty ? _streamingAssistantText : content;
+      final nextContent = hasVisibleContent ? content : _streamingAssistantText;
       _state = _state.copyWith(
-        messages: nextContent.isEmpty
+        messages: nextContent.trim().isEmpty
             ? _state.messages
             : _upsertAssistantMessage(
                 messageId: messageId,
@@ -2492,11 +2600,14 @@ $request
       return;
     }
 
-    if (content.isNotEmpty) {
+    final assistantContent = hasVisibleContent
+        ? content
+        : _emptyVisibleAssistantResponseMessage();
+    if (assistantContent.isNotEmpty) {
       final assistantMessage = ChatMessage(
         id: _nextMessageId(),
         role: MessageRole.assistant,
-        content: content,
+        content: assistantContent,
         timestampLabel: 'Now',
         tokenUsage: tokenUsage,
       );

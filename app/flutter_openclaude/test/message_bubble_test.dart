@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_openclaude/workbench/message_bubble.dart';
 import 'package:flutter_openclaude/workbench/workbench_models.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -88,4 +89,52 @@ void main() {
       expect(hoveredDecoration.border!.top.color, const Color(0xFF93C5FD));
     },
   );
+
+  testWidgets('user message bubble copies its content', (tester) async {
+    final clipboardWrites = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          final arguments = call.arguments as Map<dynamic, dynamic>;
+          clipboardWrites.add(arguments['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MessageBubble(
+            message: ChatMessage(
+              id: 'user-copy',
+              role: MessageRole.user,
+              content: 'Create a Tetris game',
+              timestampLabel: 'Now',
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(gesture.removePointer);
+    await gesture.addPointer();
+    await gesture.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('message-bubble-user-copy'))),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('message-copy-user-copy')));
+    await tester.pump();
+
+    expect(clipboardWrites, ['Create a Tetris game']);
+  });
 }

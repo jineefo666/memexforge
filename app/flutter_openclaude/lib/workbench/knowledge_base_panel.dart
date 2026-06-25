@@ -404,6 +404,7 @@ class _MemoryFactTile extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     return DecoratedBox(
+      key: ValueKey('memory-fact-${fact.source}-${fact.id}'),
       decoration: BoxDecoration(
         color: colorScheme.surface,
         border: Border.all(color: theme.dividerColor),

@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:file_selector/file_selector.dart';
 
 import 'workbench_models.dart';
 
 const _maxAttachmentPreviewCharacters = 12000;
+const _maxInlineImageAttachmentBytes = 5 * 1024 * 1024;
 
 const _acceptedAttachmentTypes = [
   XTypeGroup(
@@ -61,6 +64,9 @@ Future<List<ChatAttachment>> chatAttachmentsFromFiles(List<XFile> files) async {
     final content = kind == ChatAttachmentKind.text
         ? await _safeTextPreview(file)
         : null;
+    final dataBase64 = kind == ChatAttachmentKind.image
+        ? await _safeImageBase64(file, knownSizeBytes: sizeBytes)
+        : null;
     attachments.add(
       ChatAttachment(
         id: _attachmentId(name: name, path: file.path, index: index),
@@ -70,6 +76,7 @@ Future<List<ChatAttachment>> chatAttachmentsFromFiles(List<XFile> files) async {
         kind: kind,
         path: file.path.isEmpty ? null : file.path,
         content: content,
+        dataBase64: dataBase64,
       ),
     );
   }
@@ -134,6 +141,20 @@ Future<int> _safeLength(XFile file) async {
 Future<String?> _safeTextPreview(XFile file) async {
   try {
     return attachmentTextPreview(await file.readAsString());
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<String?> _safeImageBase64(
+  XFile file, {
+  required int knownSizeBytes,
+}) async {
+  if (knownSizeBytes > _maxInlineImageAttachmentBytes) return null;
+  try {
+    final bytes = await file.readAsBytes();
+    if (bytes.length > _maxInlineImageAttachmentBytes) return null;
+    return base64Encode(bytes);
   } catch (_) {
     return null;
   }

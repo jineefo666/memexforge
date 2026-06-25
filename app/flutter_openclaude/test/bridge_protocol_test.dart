@@ -75,6 +75,41 @@ void main() {
     });
   });
 
+  test('encodes image attachments on start messages', () {
+    final encoded = encodeStartMessage(
+      requestId: 'req-image',
+      cwd: '/tmp/project',
+      prompt: 'What is in this screenshot?',
+      attachments: const [
+        BridgeAttachment(
+          id: 'attachment-1',
+          name: 'screenshot.png',
+          kind: 'image',
+          mimeType: 'image/png',
+          sizeBytes: 4,
+          dataBase64: 'ZmFrZQ==',
+        ),
+      ],
+    );
+
+    expect(jsonDecode(encoded), {
+      'type': 'start',
+      'requestId': 'req-image',
+      'cwd': '/tmp/project',
+      'prompt': 'What is in this screenshot?',
+      'attachments': [
+        {
+          'id': 'attachment-1',
+          'name': 'screenshot.png',
+          'kind': 'image',
+          'mimeType': 'image/png',
+          'sizeBytes': 4,
+          'dataBase64': 'ZmFrZQ==',
+        },
+      ],
+    });
+  });
+
   test('encodes transcript context mode on start messages', () {
     final encoded = encodeStartMessage(
       requestId: 'req-context-mode',

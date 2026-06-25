@@ -105,86 +105,97 @@ class _ConversationWorkspaceState extends State<ConversationWorkspace> {
         )
         .toList();
     final activeToolRun = _activeToolRunForChat(widget.state.toolRuns);
-    return Container(
-      key: const ValueKey('conversation-workspace'),
-      color: theme.scaffoldBackgroundColor,
-      child: SafeArea(
-        child: Column(
-          children: [
-            _ConversationHeader(
-              state: widget.state,
-              onProjectDirectorySelected: widget.onProjectDirectorySelected,
-            ),
-            Expanded(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: _handleScrollNotification,
-                child: ListView.separated(
-                  controller: _messageScrollController,
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                  itemCount:
-                      widget.state.messages.length +
-                      (showInlineStreaming ? 1 : 0) +
-                      learningCandidates.length +
-                      (activeToolRun == null ? 0 : 1),
-                  separatorBuilder: (_, _) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final messageCount = widget.state.messages.length;
-                    if (index < messageCount) {
-                      final message = widget.state.messages[index];
-                      return MessageBubble(
-                        message: message,
-                        onSelected: () =>
-                            widget.onMessageSelected?.call(message.id),
-                      );
-                    }
-                    if (showInlineStreaming && index == messageCount) {
-                      return const _InlineStreamingStatus();
-                    }
-                    final learningIndex =
-                        index - messageCount - (showInlineStreaming ? 1 : 0);
-                    if (learningIndex >= 0 &&
-                        learningIndex < learningCandidates.length) {
-                      final candidate = learningCandidates[learningIndex];
-                      return _LearningCandidateCard(
-                        candidate: candidate,
-                        onAccepted: () => widget.onLearningCandidateAccepted
-                            ?.call(candidate.id),
-                        onDismissed: () => widget.onLearningCandidateDismissed
-                            ?.call(candidate.id),
-                      );
-                    }
-                    final toolIndex =
-                        index -
-                        messageCount -
-                        (showInlineStreaming ? 1 : 0) -
-                        learningCandidates.length;
-                    if (toolIndex == 0 && activeToolRun != null) {
-                      return ToolCallCard(
-                        toolRun: activeToolRun,
-                        onSelected: () =>
-                            widget.onToolSelected?.call(activeToolRun.id),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 280;
+        return Container(
+          key: const ValueKey('conversation-workspace'),
+          color: theme.scaffoldBackgroundColor,
+          child: SafeArea(
+            child: Column(
+              children: [
+                _ConversationHeader(
+                  state: widget.state,
+                  compact: compact,
+                  onProjectDirectorySelected: widget.onProjectDirectorySelected,
                 ),
-              ),
+                Expanded(
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _handleScrollNotification,
+                    child: ListView.separated(
+                      controller: _messageScrollController,
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                      itemCount:
+                          widget.state.messages.length +
+                          (showInlineStreaming ? 1 : 0) +
+                          learningCandidates.length +
+                          (activeToolRun == null ? 0 : 1),
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final messageCount = widget.state.messages.length;
+                        if (index < messageCount) {
+                          final message = widget.state.messages[index];
+                          return MessageBubble(
+                            message: message,
+                            onSelected: () =>
+                                widget.onMessageSelected?.call(message.id),
+                          );
+                        }
+                        if (showInlineStreaming && index == messageCount) {
+                          return const _InlineStreamingStatus();
+                        }
+                        final learningIndex =
+                            index -
+                            messageCount -
+                            (showInlineStreaming ? 1 : 0);
+                        if (learningIndex >= 0 &&
+                            learningIndex < learningCandidates.length) {
+                          final candidate = learningCandidates[learningIndex];
+                          return _LearningCandidateCard(
+                            candidate: candidate,
+                            onAccepted: () => widget.onLearningCandidateAccepted
+                                ?.call(candidate.id),
+                            onDismissed: () => widget
+                                .onLearningCandidateDismissed
+                                ?.call(candidate.id),
+                          );
+                        }
+                        final toolIndex =
+                            index -
+                            messageCount -
+                            (showInlineStreaming ? 1 : 0) -
+                            learningCandidates.length;
+                        if (toolIndex == 0 && activeToolRun != null) {
+                          return ToolCallCard(
+                            toolRun: activeToolRun,
+                            onSelected: () =>
+                                widget.onToolSelected?.call(activeToolRun.id),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                  ),
+                ),
+                _Composer(
+                  controller: _composerController,
+                  isStreaming: widget.state.isStreaming,
+                  thinkingModeEnabled:
+                      widget.state.personal.thinkingModeEnabled,
+                  compact: compact,
+                  skills: widget.state.extensions.skills,
+                  onSendMessage: widget.onSendMessage,
+                  onSendRequest: widget.onSendRequest,
+                  onThinkingModeChanged: widget.onThinkingModeChanged,
+                  onStop: widget.onStop,
+                  onPickAttachments: widget.onPickAttachments,
+                  attachmentDropController: widget.attachmentDropController,
+                ),
+              ],
             ),
-            _Composer(
-              controller: _composerController,
-              isStreaming: widget.state.isStreaming,
-              thinkingModeEnabled: widget.state.personal.thinkingModeEnabled,
-              skills: widget.state.extensions.skills,
-              onSendMessage: widget.onSendMessage,
-              onSendRequest: widget.onSendRequest,
-              onThinkingModeChanged: widget.onThinkingModeChanged,
-              onStop: widget.onStop,
-              onPickAttachments: widget.onPickAttachments,
-              attachmentDropController: widget.attachmentDropController,
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -382,10 +393,12 @@ class _LearningCandidateCard extends StatelessWidget {
 class _ConversationHeader extends StatelessWidget {
   const _ConversationHeader({
     required this.state,
+    required this.compact,
     required this.onProjectDirectorySelected,
   });
 
   final WorkbenchState state;
+  final bool compact;
   final VoidCallback? onProjectDirectorySelected;
 
   @override
@@ -410,7 +423,10 @@ class _ConversationHeader extends StatelessWidget {
         ? state.activeSession!.subtitle.trim()
         : state.personal.defaultWorkingDirectory;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 16 : 20,
+        vertical: compact ? 8 : 14,
+      ),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(bottom: BorderSide(color: theme.dividerColor)),
@@ -446,6 +462,15 @@ class _ConversationHeader extends StatelessWidget {
                 key: const ValueKey('chat-open-project-button'),
                 icon: const Icon(Icons.folder_open_outlined, size: 18),
                 label: const Text('Open project'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: Size(0, compact ? 32 : 40),
+                  visualDensity: compact
+                      ? VisualDensity.compact
+                      : VisualDensity.standard,
+                  tapTargetSize: compact
+                      ? MaterialTapTargetSize.shrinkWrap
+                      : MaterialTapTargetSize.padded,
+                ),
                 onPressed: onProjectDirectorySelected,
               ),
             ],
@@ -601,6 +626,7 @@ class _Composer extends StatefulWidget {
     required this.controller,
     required this.isStreaming,
     required this.thinkingModeEnabled,
+    required this.compact,
     required this.skills,
     required this.onSendMessage,
     required this.onSendRequest,
@@ -613,6 +639,7 @@ class _Composer extends StatefulWidget {
   final TextEditingController controller;
   final bool isStreaming;
   final bool thinkingModeEnabled;
+  final bool compact;
   final List<SkillSummary> skills;
   final ValueChanged<String>? onSendMessage;
   final ChatSendRequestHandler? onSendRequest;
@@ -675,7 +702,12 @@ class _ComposerState extends State<_Composer> {
           const _InsertNewlineIntent(),
     };
     final composer = Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+      padding: EdgeInsets.fromLTRB(
+        widget.compact ? 16 : 20,
+        widget.compact ? 8 : 12,
+        widget.compact ? 16 : 20,
+        widget.compact ? 8 : 16,
+      ),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(top: BorderSide(color: theme.dividerColor)),
@@ -911,6 +943,7 @@ class _ComposerState extends State<_Composer> {
   }
 
   void _send() {
+    if (widget.isStreaming) return;
     final text = widget.controller.text.trim();
     if (text.isEmpty && _attachments.isEmpty) return;
     final sendText = text.isEmpty ? _defaultAttachmentPrompt() : text;

@@ -289,6 +289,7 @@ class _TimelineTile extends StatelessWidget {
     final statusColor = _timelineStatusColor(colorScheme, entry.status);
     final detail = entry.detail ?? '';
     return Padding(
+      key: ValueKey('diagnostics-timeline-${entry.id}'),
       padding: const EdgeInsets.only(bottom: 10),
       child: DecoratedBox(
         decoration: BoxDecoration(

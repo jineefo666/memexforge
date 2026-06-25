@@ -119,6 +119,52 @@ void main() {
     expect(stopped, isTrue);
   });
 
+  testWidgets('conversation fits compact desktop heights', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(464, 210));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 464,
+            height: 210,
+            child: ConversationWorkspace(state: createInitialWorkbenchState()),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('composer keeps draft when Enter is pressed while streaming', (
+    tester,
+  ) async {
+    String? sent;
+    final state = createInitialWorkbenchState().copyWith(isStreaming: true);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ConversationWorkspace(
+            state: state,
+            onSendMessage: (text) => sent = text,
+          ),
+        ),
+      ),
+    );
+
+    final input = find.byKey(const ValueKey('composer-input'));
+    await tester.tap(input);
+    await tester.enterText(input, 'Second prompt');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(sent, isNull);
+    expect(tester.widget<TextField>(input).controller?.text, 'Second prompt');
+  });
+
   testWidgets('composer think mode button toggles personal setting', (
     tester,
   ) async {

@@ -28,6 +28,7 @@ final class BridgeClient {
     String? contextTranscriptMode,
     String? thinkingMode,
     List<BridgeTranscriptMessage> transcript = const [],
+    List<BridgeAttachment> attachments = const [],
     BridgeProviderConfig? provider,
   }) {
     _transport.send(
@@ -41,6 +42,7 @@ final class BridgeClient {
         contextTranscriptMode: contextTranscriptMode,
         thinkingMode: thinkingMode,
         transcript: transcript,
+        attachments: attachments,
         provider: provider,
       ),
     );

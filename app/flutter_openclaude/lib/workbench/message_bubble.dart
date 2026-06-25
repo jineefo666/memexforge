@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 
 import 'workbench_models.dart';
@@ -21,6 +22,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     final theme = Theme.of(context);
     final isUser = widget.message.role == MessageRole.user;
     final isAssistant = widget.message.role == MessageRole.assistant;
+    final canCopy = isUser && widget.message.content.trim().isNotEmpty;
     final roleLabel = switch (widget.message.role) {
       MessageRole.user => 'You',
       MessageRole.assistant => 'Assistant',
@@ -86,11 +88,36 @@ class _MessageBubbleState extends State<MessageBubble> {
                             widget.message.timestampLabel,
                             style: theme.textTheme.labelSmall,
                           ),
+                          if (canCopy) ...[
+                            const SizedBox(width: 6),
+                            AnimatedOpacity(
+                              opacity: _isHovered ? 1 : 0,
+                              duration: const Duration(milliseconds: 120),
+                              child: IgnorePointer(
+                                ignoring: !_isHovered,
+                                child: SizedBox.square(
+                                  dimension: 28,
+                                  child: IconButton(
+                                    key: ValueKey(
+                                      'message-copy-${widget.message.id}',
+                                    ),
+                                    tooltip: 'Copy message',
+                                    padding: EdgeInsets.zero,
+                                    iconSize: 16,
+                                    onPressed: _copyMessage,
+                                    icon: const Icon(Icons.copy_outlined),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 8),
                       if (isUser)
-                        Text(widget.message.content)
+                        SelectionArea(
+                          child: Text(widget.message.content),
+                        )
                       else
                         SelectionArea(
                           child: GptMarkdown(
@@ -120,6 +147,10 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
       ),
     );
+  }
+
+  Future<void> _copyMessage() async {
+    await Clipboard.setData(ClipboardData(text: widget.message.content));
   }
 }
 

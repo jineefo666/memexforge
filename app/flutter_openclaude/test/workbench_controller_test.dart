@@ -131,6 +131,26 @@ void main() {
     controller.dispose();
   });
 
+  test('sendMessage ignores duplicate sends while a request is running', () {
+    final transport = FakeBridgeTransport();
+    final controller = WorkbenchController(
+      bridgeClient: BridgeClient(transport),
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+      ),
+    );
+
+    controller.sendMessage('Create the UI');
+    controller.sendMessage('Second prompt while running');
+
+    expect(transport.sent, hasLength(1));
+    expect(controller.state.messages, hasLength(1));
+    expect(controller.state.messages.single.content, 'Create the UI');
+    expect(controller.state.isStreaming, isTrue);
+
+    controller.dispose();
+  });
+
   test('sendMessage forwards full recent transcript context mode', () {
     final transport = FakeBridgeTransport();
     final controller = WorkbenchController(
@@ -188,6 +208,82 @@ void main() {
     expect(sent['prompt'], contains('<attachments>'));
     expect(sent['prompt'], contains('notes.txt'));
     expect(sent['prompt'], contains('Alpha notes'));
+
+    controller.dispose();
+  });
+
+  test('sendMessage forwards image attachment payloads to the bridge', () {
+    final transport = FakeBridgeTransport();
+    final controller = WorkbenchController(
+      bridgeClient: BridgeClient(transport),
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+      ),
+    );
+
+    controller.sendMessage(
+      'Analyze this screenshot',
+      attachments: const [
+        ChatAttachment(
+          id: 'attachment-1',
+          name: 'screenshot.png',
+          mimeType: 'image/png',
+          sizeBytes: 4,
+          kind: ChatAttachmentKind.image,
+          path: '/tmp/screenshot.png',
+          dataBase64: 'ZmFrZQ==',
+        ),
+      ],
+    );
+
+    final sent = jsonDecode(transport.sent.single) as Map<String, dynamic>;
+    expect(sent['attachments'], [
+      {
+        'id': 'attachment-1',
+        'name': 'screenshot.png',
+        'kind': 'image',
+        'mimeType': 'image/png',
+        'sizeBytes': 4,
+        'path': '/tmp/screenshot.png',
+        'dataBase64': 'ZmFrZQ==',
+      },
+    ]);
+
+    controller.dispose();
+  });
+
+  test('sendMessage blocks image attachments for known text-only models', () {
+    final transport = FakeBridgeTransport();
+    final controller = WorkbenchController(
+      bridgeClient: BridgeClient(transport),
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+        provider: createInitialWorkbenchState().provider.copyWith(
+          providerName: 'OpenAI Compatible',
+          modelName: 'deepseek-v4-pro',
+          baseUrl: 'https://api.deepseek.com/v1',
+        ),
+      ),
+    );
+
+    controller.sendMessage(
+      'Analyze this screenshot',
+      attachments: const [
+        ChatAttachment(
+          id: 'attachment-1',
+          name: 'screenshot.png',
+          mimeType: 'image/png',
+          sizeBytes: 4,
+          kind: ChatAttachmentKind.image,
+          dataBase64: 'ZmFrZQ==',
+        ),
+      ],
+    );
+
+    expect(transport.sent, isEmpty);
+    expect(controller.state.isStreaming, isFalse);
+    expect(controller.state.connectionStatus, ConnectionStatus.error);
+    expect(controller.state.errorMessage, contains('does not support images'));
 
     controller.dispose();
   });
@@ -483,6 +579,62 @@ void main() {
       await flushBridgeMessages();
 
       expect(controller.state.messages.last.content, 'Final answer');
+      expect(
+        controller.state.diagnosticLogs.first.title,
+        'Only thinking deltas streamed',
+      );
+
+      controller.dispose();
+    },
+  );
+
+  test(
+    'empty result after thinking-only stream shows visible fallback',
+    () async {
+      final transport = FakeBridgeTransport();
+      final controller = WorkbenchController(
+        bridgeClient: BridgeClient(transport),
+        initialState: createInitialWorkbenchState().copyWith(
+          connectionStatus: ConnectionStatus.connected,
+        ),
+      );
+
+      controller.sendMessage('Think then answer');
+      transport.incoming.add(
+        jsonEncode({
+          'type': 'sdk_message',
+          'requestId': 'ui-request-1',
+          'sessionId': 'sdk-session-1',
+          'message': {
+            'type': 'stream_event',
+            'event': {
+              'type': 'content_block_delta',
+              'index': 0,
+              'delta': {'type': 'thinking_delta', 'thinking': 'Thinking'},
+            },
+          },
+        }),
+      );
+      await flushBridgeMessages();
+      transport.incoming.add(
+        jsonEncode({
+          'type': 'sdk_message',
+          'requestId': 'ui-request-1',
+          'sessionId': 'sdk-session-1',
+          'message': {'type': 'result', 'result': ''},
+        }),
+      );
+      await flushBridgeMessages();
+
+      final assistantMessages = controller.state.messages
+          .where((message) => message.role == MessageRole.assistant)
+          .toList();
+      expect(assistantMessages, hasLength(1));
+      expect(
+        assistantMessages.single.content,
+        contains('No visible response was returned'),
+      );
+      expect(controller.state.isStreaming, isFalse);
       expect(
         controller.state.diagnosticLogs.first.title,
         'Only thinking deltas streamed',
@@ -1680,6 +1832,26 @@ void main() {
     controller.dispose();
   });
 
+  test('query running errors do not mark the bridge disconnected', () async {
+    final transport = FakeBridgeTransport();
+    final controller = WorkbenchController(
+      bridgeClient: BridgeClient(transport),
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+      ),
+    );
+
+    transport.incoming.add(
+      '{"type":"error","requestId":"ui-request-2","code":"QUERY_RUNNING","message":"A query is already running for this app bridge session."}',
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.state.connectionStatus, ConnectionStatus.connected);
+    expect(controller.state.errorMessage, contains('already running'));
+
+    controller.dispose();
+  });
+
   test('bridge errors are redacted before entering UI state', () async {
     final transport = FakeBridgeTransport();
     final controller = WorkbenchController(
@@ -2194,21 +2366,22 @@ void main() {
     controller.dispose();
   });
 
-  test(
-    'submitApiKey marks provider key as configured without storing the key',
-    () {
-      final controller = WorkbenchController(
-        initialState: createInitialWorkbenchState(),
-      );
+  test('submitApiKey associates api key with the current route', () {
+    final controller = WorkbenchController(
+      initialState: createInitialWorkbenchState(),
+    );
 
-      controller.submitApiKey('sk-secret-value');
+    controller.submitApiKey('sk-secret-value');
 
-      expect(controller.state.provider.apiKeyConfigured, isTrue);
-      expect(controller.state.toString(), isNot(contains('sk-secret-value')));
+    expect(controller.state.provider.apiKeyConfigured, isTrue);
+    expect(
+      controller.connectionRequestForCurrentProvider()?.apiKey,
+      'sk-secret-value',
+    );
+    expect(controller.state.toString(), isNot(contains('sk-secret-value')));
 
-      controller.dispose();
-    },
-  );
+    controller.dispose();
+  });
 
   test('testProviderConnection associates api key with current route', () {
     final controller = WorkbenchController(

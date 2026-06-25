@@ -528,6 +528,42 @@ final class BridgeTranscriptMessage {
   }
 }
 
+final class BridgeAttachment {
+  const BridgeAttachment({
+    required this.id,
+    required this.name,
+    required this.kind,
+    required this.mimeType,
+    required this.sizeBytes,
+    this.path,
+    this.content,
+    this.dataBase64,
+  });
+
+  final String id;
+  final String name;
+  final String kind;
+  final String mimeType;
+  final int sizeBytes;
+  final String? path;
+  final String? content;
+  final String? dataBase64;
+
+  Map<String, dynamic> toJson() {
+    final value = <String, dynamic>{
+      'id': id,
+      'name': name,
+      'kind': kind,
+      'mimeType': mimeType,
+      'sizeBytes': sizeBytes,
+    };
+    if (path != null) value['path'] = path;
+    if (content != null) value['content'] = content;
+    if (dataBase64 != null) value['dataBase64'] = dataBase64;
+    return value;
+  }
+}
+
 final class BridgeProviderConfig {
   const BridgeProviderConfig({
     required this.providerName,
@@ -561,6 +597,7 @@ String encodeStartMessage({
   String? contextTranscriptMode,
   String? thinkingMode,
   List<BridgeTranscriptMessage> transcript = const [],
+  List<BridgeAttachment> attachments = const [],
   BridgeProviderConfig? provider,
 }) {
   final message = <String, dynamic>{
@@ -578,6 +615,11 @@ String encodeStartMessage({
   if (thinkingMode != null) message['thinkingMode'] = thinkingMode;
   if (transcript.isNotEmpty) {
     message['transcript'] = [for (final entry in transcript) entry.toJson()];
+  }
+  if (attachments.isNotEmpty) {
+    message['attachments'] = [
+      for (final attachment in attachments) attachment.toJson(),
+    ];
   }
   if (provider != null) message['provider'] = provider.toJson();
   return _encode(message);
