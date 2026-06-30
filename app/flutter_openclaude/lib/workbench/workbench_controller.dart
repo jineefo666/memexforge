@@ -82,6 +82,7 @@ class WorkbenchController extends ChangeNotifier {
   WorkbenchState _state;
   final _apiKeysByRoute = <String, String>{};
   final _messagesBySessionId = <String, List<ChatMessage>>{};
+  final _providerConnectionTestRequests = <String, ProviderConnectionRequest>{};
   final _allowAllToolPermissionSessionIds = <String>{};
   int _messageCounter = 0;
   int _requestCounter = 0;
@@ -141,6 +142,9 @@ class WorkbenchController extends ChangeNotifier {
       _messagesBySessionId
         ..clear()
         ..addAll(restored.messagesBySessionId);
+      _messageCounter = _maxRestoredMessageCounter(
+        restored.messagesBySessionId,
+      );
       _state = _state.copyWith(
         sessions: restored.sessions,
         activeSessionId: restored.activeSessionId,
@@ -1387,17 +1391,45 @@ $request
   void testProviderConnection(ProviderConnectionRequest request) {
     final apiKey = request.apiKey.trim();
     if (apiKey.isEmpty) return;
+    final bridgeClient = _bridgeClient;
+    if (bridgeClient == null) {
+      _state = _state.copyWith(
+        provider: _state.provider.copyWith(apiKeyConfigured: false),
+        connectionStatus: ConnectionStatus.error,
+        errorMessage:
+            'No app bridge is connected. Start app-bridge and reconnect.',
+      );
+      notifyListeners();
+      return;
+    }
 
-    _apiKeysByRoute[request.routeKey] = apiKey;
+    final requestId = _nextRequestId();
+    _providerConnectionTestRequests[requestId] = request;
     _state = _state.copyWith(
       provider: _state.provider.copyWith(
         providerName: request.providerName,
         modelName: request.modelName,
         baseUrl: request.baseUrl,
         bridgeUrl: _state.bridgeUrl,
-        apiKeyConfigured: true,
+        apiKeyConfigured: false,
       ),
+      connectionStatus: ConnectionStatus.connected,
       inspector: const InspectorSelection(kind: InspectorKind.settings),
+      diagnosticLogs: _prependDiagnostic(
+        DiagnosticSeverity.info,
+        'Provider connection test started',
+        'Testing ${request.providerName} / ${request.modelName}.',
+      ),
+      clearErrorMessage: true,
+    );
+    bridgeClient.testProviderConnection(
+      requestId: requestId,
+      provider: BridgeProviderConfig(
+        providerName: request.providerName,
+        modelName: request.modelName,
+        baseUrl: request.baseUrl,
+        apiKey: apiKey,
+      ),
     );
     notifyListeners();
     _persistState();
@@ -1405,6 +1437,7 @@ $request
 
   ProviderConnectionRequest? connectionRequestForCurrentProvider() {
     final provider = _state.provider;
+    if (!provider.apiKeyConfigured) return null;
     final routeKey = _routeKeyForProvider(provider);
     final apiKey = _apiKeysByRoute[routeKey];
     if (apiKey == null) return null;
@@ -1518,6 +1551,8 @@ $request
         _handleExtensionRuntimeMessage(message);
       case BridgeAgentEvalTraceStatusMessage():
         _handleAgentEvalTraceStatusMessage(message);
+      case BridgeProviderConnectionTestResultMessage():
+        _handleProviderConnectionTestResultMessage(message);
       case BridgeSdkMessage():
         _handleSdkMessage(message);
       case BridgeContextRetrievalMessage():
@@ -1733,6 +1768,15 @@ $request
         code == 'MCP_SERVER_TEST_FAILED';
   }
 
+  bool _isActiveQueryBridgeError(BridgeErrorMessage message) {
+    if (message.code != 'QUERY_RUNNING' && message.code != 'QUERY_FAILED') {
+      return false;
+    }
+    final activeRequestId = _activeRequestId;
+    return activeRequestId != null &&
+        (message.requestId == null || message.requestId == activeRequestId);
+  }
+
   void _handleBridgeError(Object error) {
     _activeRequestId = null;
     _resetActiveStreamCounters();
@@ -1875,6 +1919,11 @@ $request
     final redactedMessage = _appFriendlyBridgeErrorMessage(
       _redactSensitiveText(message.message),
     );
+    if (_isActiveQueryBridgeError(message)) {
+      _activeRequestId = null;
+      _resetActiveStreamCounters();
+      _resetStreamingAssistantDraft();
+    }
     var extensions = _state.extensions;
     if (message.code == 'SKILLS_LIST_FAILED' ||
         message.code == 'SKILL_IMPORT_FAILED' ||
@@ -1911,6 +1960,40 @@ $request
         redactedMessage,
       ),
     );
+  }
+
+  void _handleProviderConnectionTestResultMessage(
+    BridgeProviderConnectionTestResultMessage message,
+  ) {
+    final request = _providerConnectionTestRequests.remove(message.requestId);
+    if (request == null) return;
+
+    final isConnected = message.status == 'connected';
+    final redactedMessage = _redactSensitiveText(message.message);
+    if (isConnected) {
+      _apiKeysByRoute[request.routeKey] = request.apiKey;
+    }
+    _state = _state.copyWith(
+      provider: _state.provider.copyWith(
+        providerName: request.providerName,
+        modelName: request.modelName,
+        baseUrl: request.baseUrl,
+        bridgeUrl: _state.bridgeUrl,
+        apiKeyConfigured: isConnected,
+      ),
+      connectionStatus: ConnectionStatus.connected,
+      errorMessage: isConnected ? null : redactedMessage,
+      clearErrorMessage: isConnected,
+      diagnosticLogs: _prependDiagnostic(
+        isConnected ? DiagnosticSeverity.success : DiagnosticSeverity.error,
+        isConnected
+            ? 'Provider connection verified'
+            : 'Provider connection failed',
+        redactedMessage,
+      ),
+      inspector: const InspectorSelection(kind: InspectorKind.settings),
+    );
+    _persistState();
   }
 
   String _appFriendlyBridgeErrorMessage(String message) {
@@ -2126,6 +2209,7 @@ $request
       connectionStatus: ConnectionStatus.connected,
       clearErrorMessage: true,
     );
+    refreshSkills();
   }
 
   void _handleSkillUpdatedMessage(BridgeSkillUpdatedMessage message) {
@@ -3121,6 +3205,22 @@ $request
   String _nextMessageId() {
     _messageCounter += 1;
     return 'ui-message-$_messageCounter';
+  }
+
+  int _maxRestoredMessageCounter(
+    Map<String, List<ChatMessage>> messagesBySessionId,
+  ) {
+    var maxCounter = _messageCounter;
+    for (final messages in messagesBySessionId.values) {
+      for (final message in messages) {
+        final match = RegExp(r'^ui-message-(\d+)$').firstMatch(message.id);
+        final value = int.tryParse(match?.group(1) ?? '');
+        if (value != null && value > maxCounter) {
+          maxCounter = value;
+        }
+      }
+    }
+    return maxCounter;
   }
 
   String _nextRequestId() {

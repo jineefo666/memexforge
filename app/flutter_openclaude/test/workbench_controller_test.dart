@@ -1832,6 +1832,30 @@ void main() {
     controller.dispose();
   });
 
+  test('query errors allow the next prompt to be sent', () async {
+    final transport = FakeBridgeTransport();
+    final controller = WorkbenchController(
+      bridgeClient: BridgeClient(transport),
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+      ),
+    );
+
+    controller.sendMessage('first prompt');
+    transport.incoming.add(
+      '{"type":"error","requestId":"ui-request-1","code":"QUERY_FAILED","message":"Provider rejected the request"}',
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    controller.sendMessage('second prompt');
+
+    expect(transport.sent, hasLength(2));
+    expect(controller.state.messages.last.content, 'second prompt');
+    expect(controller.state.isStreaming, isTrue);
+
+    controller.dispose();
+  });
+
   test('query running errors do not mark the bridge disconnected', () async {
     final transport = FakeBridgeTransport();
     final controller = WorkbenchController(
@@ -2383,9 +2407,13 @@ void main() {
     controller.dispose();
   });
 
-  test('testProviderConnection associates api key with current route', () {
+  test('testProviderConnection sends provider validation to bridge', () {
+    final transport = FakeBridgeTransport();
     final controller = WorkbenchController(
-      initialState: createInitialWorkbenchState(),
+      bridgeClient: BridgeClient(transport),
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+      ),
     );
 
     controller.testProviderConnection(
@@ -2397,17 +2425,80 @@ void main() {
       ),
     );
 
-    expect(controller.state.provider.apiKeyConfigured, isTrue);
+    final sent = jsonDecode(transport.sent.single) as Map<String, dynamic>;
+    expect(sent['type'], 'provider_connection_test');
+    expect(sent['requestId'], 'ui-request-1');
+    expect(sent['provider']['apiKey'], 'sk-secret-value');
+    expect(controller.state.provider.apiKeyConfigured, isFalse);
     expect(controller.state.provider.modelName, 'deepseek-v4-flash');
     expect(controller.state.provider.baseUrl, 'https://api.deepseek.com/v1');
 
-    final request = controller.connectionRequestForCurrentProvider();
-    expect(request?.apiKey, 'sk-secret-value');
-    expect(
-      request?.routeKey,
-      'OpenAI Compatible::deepseek-v4-flash::https://api.deepseek.com/v1',
+    controller.dispose();
+  });
+
+  test(
+    'provider connection success associates api key with current route',
+    () async {
+      final transport = FakeBridgeTransport();
+      final controller = WorkbenchController(
+        bridgeClient: BridgeClient(transport),
+        initialState: createInitialWorkbenchState().copyWith(
+          connectionStatus: ConnectionStatus.connected,
+        ),
+      );
+
+      controller.testProviderConnection(
+        const ProviderConnectionRequest(
+          providerName: 'OpenAI Compatible',
+          modelName: 'deepseek-v4-flash',
+          baseUrl: 'https://api.deepseek.com/v1',
+          apiKey: 'sk-secret-value',
+        ),
+      );
+      transport.incoming.add(
+        '{"type":"provider_connection_test_result","requestId":"ui-request-1","status":"connected","message":"Connected","durationMs":42,"checkedAt":"2026-06-30T00:00:00.000Z"}',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state.provider.apiKeyConfigured, isTrue);
+      final request = controller.connectionRequestForCurrentProvider();
+      expect(request?.apiKey, 'sk-secret-value');
+      expect(
+        request?.routeKey,
+        'OpenAI Compatible::deepseek-v4-flash::https://api.deepseek.com/v1',
+      );
+      expect(controller.state.toString(), isNot(contains('sk-secret-value')));
+
+      controller.dispose();
+    },
+  );
+
+  test('provider connection failure keeps api key unconfigured', () async {
+    final transport = FakeBridgeTransport();
+    final controller = WorkbenchController(
+      bridgeClient: BridgeClient(transport),
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+      ),
     );
-    expect(controller.state.toString(), isNot(contains('sk-secret-value')));
+
+    controller.testProviderConnection(
+      const ProviderConnectionRequest(
+        providerName: 'OpenAI Compatible',
+        modelName: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'bad-secret-value',
+      ),
+    );
+    transport.incoming.add(
+      '{"type":"provider_connection_test_result","requestId":"ui-request-1","status":"failed","message":"Provider returned 401: invalid api key","durationMs":42,"checkedAt":"2026-06-30T00:00:00.000Z"}',
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.state.provider.apiKeyConfigured, isFalse);
+    expect(controller.connectionRequestForCurrentProvider(), isNull);
+    expect(controller.state.errorMessage, contains('401'));
+    expect(controller.state.toString(), isNot(contains('bad-secret-value')));
 
     controller.dispose();
   });
@@ -2534,6 +2625,79 @@ void main() {
   });
 
   test(
+    'restored sessions append fresh assistant replies after restart',
+    () async {
+      final store = MemoryWorkbenchPersistenceStore({
+        'version': 1,
+        'activeSessionId': 'session-api',
+        'messagesSessionId': 'session-api',
+        'sessions': [
+          {
+            'id': 'session-api',
+            'title': 'API setup',
+            'subtitle': '/workspace/openclaude',
+            'status': 'idle',
+            'updatedLabel': 'Yesterday',
+          },
+        ],
+        'messages': [
+          {
+            'id': 'ui-message-1',
+            'role': 'user',
+            'content': 'old prompt',
+            'timestampLabel': 'Yesterday',
+          },
+          {
+            'id': 'ui-message-2',
+            'role': 'assistant',
+            'content': 'old answer',
+            'timestampLabel': 'Yesterday',
+          },
+        ],
+        'provider': {
+          'providerName': 'OpenAI Compatible',
+          'modelName': 'deepseek-v4-flash',
+          'baseUrl': 'https://api.deepseek.com/v1',
+          'bridgeUrl': 'ws://127.0.0.1:58434',
+          'apiKeyConfigured': true,
+        },
+        'apiKeysByRoute': {
+          'OpenAI Compatible::deepseek-v4-flash::https://api.deepseek.com/v1':
+              'sk-persisted',
+        },
+      });
+      final transport = FakeBridgeTransport();
+      final controller = WorkbenchController(
+        bridgeClient: BridgeClient(transport),
+        persistenceStore: store,
+        initialState: createInitialWorkbenchState().copyWith(
+          connectionStatus: ConnectionStatus.connected,
+        ),
+      );
+
+      await controller.restorePersistedState();
+      controller.sendMessage('fresh prompt');
+      transport.incoming.add(
+        '{"type":"sdk_message","requestId":"ui-request-1","sessionId":"sdk-session-1","message":{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"fresh answer"}}}}',
+      );
+      transport.incoming.add(
+        '{"type":"sdk_message","requestId":"ui-request-1","sessionId":"sdk-session-1","message":{"type":"result","result":"fresh answer"}}',
+      );
+      await flushBridgeMessages();
+
+      expect(controller.state.messages.map((message) => message.content), [
+        'old prompt',
+        'old answer',
+        'fresh prompt',
+        'fresh answer',
+      ]);
+      expect(controller.state.messages.last.role, MessageRole.assistant);
+
+      controller.dispose();
+    },
+  );
+
+  test(
     'restores persisted local bridge urls without forcing the default port',
     () async {
       final store = MemoryWorkbenchPersistenceStore({
@@ -2594,59 +2758,61 @@ void main() {
     controller.dispose();
   });
 
-  test(
-    'saves sessions provider api keys and personal settings locally',
-    () async {
-      final store = MemoryWorkbenchPersistenceStore();
-      final controller = WorkbenchController(
-        persistenceStore: store,
-        initialState: createInitialWorkbenchState(),
-      );
+  test('saves sessions provider api keys and personal settings locally', () async {
+    final store = MemoryWorkbenchPersistenceStore();
+    final transport = FakeBridgeTransport();
+    final controller = WorkbenchController(
+      bridgeClient: BridgeClient(transport),
+      persistenceStore: store,
+      initialState: createInitialWorkbenchState().copyWith(
+        connectionStatus: ConnectionStatus.connected,
+      ),
+    );
 
-      controller.testProviderConnection(
-        const ProviderConnectionRequest(
-          providerName: 'OpenAI Compatible',
-          modelName: 'deepseek-v4-flash',
-          baseUrl: 'https://api.deepseek.com/v1',
-          apiKey: 'sk-secret-value',
-        ),
-      );
-      controller.updatePersonal(
-        controller.state.personal.copyWith(displayName: 'Jinee'),
-      );
-      controller.sendMessage('Remember this session');
-      await Future<void>.delayed(Duration.zero);
+    controller.testProviderConnection(
+      const ProviderConnectionRequest(
+        providerName: 'OpenAI Compatible',
+        modelName: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-secret-value',
+      ),
+    );
+    transport.incoming.add(
+      '{"type":"provider_connection_test_result","requestId":"ui-request-1","status":"connected","message":"Connected","durationMs":42,"checkedAt":"2026-06-30T00:00:00.000Z"}',
+    );
+    await Future<void>.delayed(Duration.zero);
+    controller.updatePersonal(
+      controller.state.personal.copyWith(displayName: 'Jinee'),
+    );
+    controller.sendMessage('Remember this session');
+    await Future<void>.delayed(Duration.zero);
 
-      expect(store.saveCount, greaterThanOrEqualTo(3));
-      expect(store.snapshot?['provider']['modelName'], 'deepseek-v4-flash');
-      expect(store.snapshot?['provider']['bridgeUrl'], 'ws://127.0.0.1:58432');
-      expect(store.snapshot?['personal']['displayName'], 'Jinee');
-      expect(store.snapshot?['sessions'][0]['title'], 'Remember this session');
-      expect(
-        store.snapshot?['messagesSessionId'],
-        controller.state.activeSessionId,
-      );
-      expect(
-        (store.snapshot?['sessions'][0] as Map<String, dynamic>).containsKey(
-          'sdkSessionId',
-        ),
-        isFalse,
-      );
-      expect(
-        store.snapshot?['messages'][0]['content'],
-        'Remember this session',
-      );
-      expect(
-        store
-            .snapshot?['apiKeysByRoute']['OpenAI Compatible::deepseek-v4-flash::https://api.deepseek.com/v1'],
-        'sk-secret-value',
-      );
-      expect(store.snapshot.toString(), contains('sk-secret-value'));
-      expect(controller.state.toString(), isNot(contains('sk-secret-value')));
+    expect(store.saveCount, greaterThanOrEqualTo(3));
+    expect(store.snapshot?['provider']['modelName'], 'deepseek-v4-flash');
+    expect(store.snapshot?['provider']['bridgeUrl'], 'ws://127.0.0.1:58432');
+    expect(store.snapshot?['personal']['displayName'], 'Jinee');
+    expect(store.snapshot?['sessions'][0]['title'], 'Remember this session');
+    expect(
+      store.snapshot?['messagesSessionId'],
+      controller.state.activeSessionId,
+    );
+    expect(
+      (store.snapshot?['sessions'][0] as Map<String, dynamic>).containsKey(
+        'sdkSessionId',
+      ),
+      isFalse,
+    );
+    expect(store.snapshot?['messages'][0]['content'], 'Remember this session');
+    expect(
+      store
+          .snapshot?['apiKeysByRoute']['OpenAI Compatible::deepseek-v4-flash::https://api.deepseek.com/v1'],
+      'sk-secret-value',
+    );
+    expect(store.snapshot.toString(), contains('sk-secret-value'));
+    expect(controller.state.toString(), isNot(contains('sk-secret-value')));
 
-      controller.dispose();
-    },
-  );
+    controller.dispose();
+  });
 
   test(
     'persists messages per session across restart and session switching',
@@ -2692,7 +2858,7 @@ void main() {
     },
   );
 
-  test('sendMessage sends configured provider credentials to bridge', () {
+  test('sendMessage sends configured provider credentials to bridge', () async {
     final transport = FakeBridgeTransport();
     final controller = WorkbenchController(
       bridgeClient: BridgeClient(transport),
@@ -2709,9 +2875,13 @@ void main() {
         apiKey: 'sk-secret-value',
       ),
     );
+    transport.incoming.add(
+      '{"type":"provider_connection_test_result","requestId":"ui-request-1","status":"connected","message":"Connected","durationMs":42,"checkedAt":"2026-06-30T00:00:00.000Z"}',
+    );
+    await Future<void>.delayed(Duration.zero);
     controller.sendMessage('Use the configured model');
 
-    final sent = jsonDecode(transport.sent.single) as Map<String, dynamic>;
+    final sent = jsonDecode(transport.sent.last) as Map<String, dynamic>;
     expect(sent['type'], 'start');
     expect(sent['model'], 'deepseek-v4-flash');
     expect(sent['provider'], {
@@ -2921,6 +3091,7 @@ void main() {
       '{"type":"skill_imported","requestId":"ui-request-1","skill":{"id":"debug","name":"debug","description":"Debug a failing workflow.","source":"local","status":"enabled","path":"/tmp/skills/debug"}}',
     );
     await Future<void>.delayed(Duration.zero);
+    expect(jsonDecode(transport.sent.last)['type'], 'skill_refresh');
     expect(controller.state.extensions.skills.single.name, 'debug');
     expect(controller.state.extensions.skills.single.status, 'enabled');
 

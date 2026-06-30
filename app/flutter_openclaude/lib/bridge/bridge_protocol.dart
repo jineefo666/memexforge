@@ -42,6 +42,23 @@ final class BridgeClosedMessage extends BridgeServerMessage {
   final String requestId;
 }
 
+final class BridgeProviderConnectionTestResultMessage
+    extends BridgeServerMessage {
+  const BridgeProviderConnectionTestResultMessage({
+    required this.requestId,
+    required this.status,
+    required this.message,
+    required this.durationMs,
+    required this.checkedAt,
+  });
+
+  final String requestId;
+  final String status;
+  final String message;
+  final int durationMs;
+  final String checkedAt;
+}
+
 final class BridgeExtensionRuntimeMessage extends BridgeServerMessage {
   const BridgeExtensionRuntimeMessage({
     required this.requestId,
@@ -625,6 +642,17 @@ String encodeStartMessage({
   return _encode(message);
 }
 
+String encodeProviderConnectionTestMessage({
+  required String requestId,
+  required BridgeProviderConfig provider,
+}) {
+  return _encode({
+    'type': 'provider_connection_test',
+    'requestId': requestId,
+    'provider': provider.toJson(),
+  });
+}
+
 String encodeRetrieveContextMessage({
   required String requestId,
   required String query,
@@ -933,6 +961,16 @@ BridgeServerMessage decodeBridgeServerMessage(String rawJson) {
       message: decoded['message'] as String,
     ),
     'closed' => BridgeClosedMessage(requestId: decoded['requestId'] as String),
+    'provider_connection_test_result' =>
+      BridgeProviderConnectionTestResultMessage(
+        requestId: decoded['requestId'] as String,
+        status: decoded['status']?.toString() ?? '',
+        message: decoded['message']?.toString() ?? '',
+        durationMs: decoded['durationMs'] is num
+            ? (decoded['durationMs'] as num).toInt()
+            : 0,
+        checkedAt: decoded['checkedAt']?.toString() ?? '',
+      ),
     'turn_timeline' => BridgeTurnTimelineMessage(
       requestId: decoded['requestId'] as String,
       stage: decoded['stage']?.toString() ?? '',

@@ -57,6 +57,15 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
   }
 
   @override
+  void didUpdateWidget(covariant ProviderSettingsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.settings.apiKeyConfigured !=
+        widget.settings.apiKeyConfigured) {
+      _apiKeyConfigured = widget.settings.apiKeyConfigured;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return ListView(
@@ -78,12 +87,14 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
             setState(() {
               _providerName = value;
               _modelName = option.model;
+              _apiKeyConfigured = false;
             });
             _emit(
               widget.settings.copyWith(
                 providerName: value,
                 modelName: option.model,
                 baseUrl: option.baseUrl,
+                apiKeyConfigured: false,
               ),
             );
           },
@@ -103,12 +114,14 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
             setState(() {
               _providerName = option.providerName;
               _modelName = value;
+              _apiKeyConfigured = false;
             });
             _emit(
               widget.settings.copyWith(
                 providerName: option.providerName,
                 modelName: value,
                 baseUrl: option.baseUrl,
+                apiKeyConfigured: false,
               ),
             );
           },
@@ -193,9 +206,7 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
   void _submitApiKey(String value) {
     final apiKey = value.trim();
     if (apiKey.isEmpty) return;
-    _configuredApiKey = apiKey;
-    widget.onApiKeySubmitted?.call(apiKey);
-    _apiKeyController.clear();
+    _testConnection();
   }
 
   void _applyCustomEndpoint() {
@@ -204,12 +215,14 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
     setState(() {
       _providerName = option.providerName;
       _modelName = option.model;
+      _apiKeyConfigured = false;
     });
     _emit(
       widget.settings.copyWith(
         providerName: option.providerName,
         modelName: option.model,
         baseUrl: option.baseUrl,
+        apiKeyConfigured: false,
       ),
     );
   }
@@ -232,15 +245,6 @@ class _ProviderSettingsPanelState extends State<ProviderSettingsPanel> {
     _configuredApiKey = apiKey;
     widget.onTestConnection?.call(request);
     _apiKeyController.clear();
-    setState(() => _apiKeyConfigured = true);
-    _emit(
-      widget.settings.copyWith(
-        providerName: request.providerName,
-        modelName: request.modelName,
-        baseUrl: request.baseUrl,
-        apiKeyConfigured: true,
-      ),
-    );
   }
 
   List<String> get _providerOptions {

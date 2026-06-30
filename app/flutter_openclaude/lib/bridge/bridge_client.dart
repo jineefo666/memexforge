@@ -62,6 +62,18 @@ final class BridgeClient {
     );
   }
 
+  void testProviderConnection({
+    required String requestId,
+    required BridgeProviderConfig provider,
+  }) {
+    _transport.send(
+      encodeProviderConnectionTestMessage(
+        requestId: requestId,
+        provider: provider,
+      ),
+    );
+  }
+
   void retrieveContext({
     required String requestId,
     required String query,

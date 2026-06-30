@@ -104,8 +104,37 @@ void main() {
       connectionRequest?.baseUrl,
       'https://generativelanguage.googleapis.com/v1beta/openai/',
     );
-    expect(changed?.apiKeyConfigured, isTrue);
+    expect(changed?.apiKeyConfigured, isFalse);
     expect(find.text('sk-test-secret'), findsNothing);
+    expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    expect(find.text('API key not configured'), findsOneWidget);
+  });
+
+  testWidgets('provider settings reflects validated API key state', (
+    tester,
+  ) async {
+    final settings = createInitialWorkbenchState().provider;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ProviderSettingsPanel(settings: settings)),
+      ),
+    );
+
+    expect(find.byIcon(Icons.lock_outline), findsOneWidget);
+    expect(find.text('API key not configured'), findsOneWidget);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProviderSettingsPanel(
+            settings: settings.copyWith(apiKeyConfigured: true),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
     expect(find.byIcon(Icons.lock_open), findsOneWidget);
     expect(find.text('配置成功'), findsOneWidget);
   });
